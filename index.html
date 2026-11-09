@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Drop Puzzle - Puyo Style</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap');
+
+        body {
+            background: linear-gradient(135deg, #1e1e2f, #2a2a4a);
+            color: #fff;
+            font-family: 'Fredoka One', cursive, sans-serif;
+            touch-action: none; /* スマホでのスクロール防止 */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        #game-container {
+            position: relative;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            margin-top: 10px;
+            transform: scale(1);
+            transform-origin: top center;
+        }
+
+        @media (max-height: 800px) {
+            #game-container { transform: scale(0.9); }
+        }
+        @media (max-height: 700px) {
+            #game-container { transform: scale(0.75); }
+        }
+        @media (max-width: 500px) {
+            #game-container { flex-direction: column; align-items: center; gap: 10px;}
+            #side-panel { flex-direction: row; gap: 20px; }
+            .mobile-controls { display: flex; }
+        }
+
+        canvas {
+            background: rgba(0, 0, 0, 0.4);
+            border: 4px solid #4a4a7a;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255,255,255,0.1);
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* クリック等を通す */
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #5a5a8a;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            backdrop-filter: blur(5px);
+        }
+
+        .value-text {
+            font-size: 1.5rem;
+            color: #ffd700;
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        /* スマホ用コントローラー */
+        .mobile-controls {
+            display: none;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(2, 60px);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            background: linear-gradient(to bottom, #6a6a9a, #4a4a7a);
+            border: 2px solid #8a8aca;
+            border-radius: 50%;
+            color: white;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #2a2a4a, 0 5px 10px rgba(0,0,0,0.3);
+            user-select: none;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #2a2a4a, 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .btn-left { grid-column: 1; grid-row: 2; }
+        .btn-down { grid-column: 2; grid-row: 2; border-radius: 12px; }
+        .btn-right { grid-column: 3; grid-row: 2; }
+        .btn-rot-l { grid-column: 1; grid-row: 1; background: linear-gradient(to bottom, #9a6a9a, #7a4a7a); border-color: #ca8aca; }
+        .btn-rot-r { grid-column: 3; grid-row: 1; background: linear-gradient(to bottom, #9a6a9a, #7a4a7a); border-color: #ca8aca;}
+
+        #game-over {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+        #game-over.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .title {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(255,255,255,0.5);
+            letter-spacing: 2px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1 class="title text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400">Jelly Drop Puzzle</h1>
+
+    <div id="game-container">
+        <!-- Main Game Board -->
+        <div style="position: relative;">
+            <canvas id="gameCanvas" width="240" height="480"></canvas>
+            <div id="game-over">
+                <h2 class="text-4xl text-red-500 mb-4 drop-shadow-[0_2px_2px_#000]">GAME OVER</h2>
+                <button onclick="resetGame()" class="px-6 py-2 bg-gradient-to-r from-green-400 to-blue-500 rounded-full text-xl shadow-[0_4px_0_#0f5a3e] active:translate-y-1 active:shadow-none transition-all">RETRY</button>
+            </div>
+        </div>
+
+        <!-- Side Panel -->
+        <div id="side-panel" class="flex flex-col gap-4">
+            <div class="panel">
+                <div class="text-sm text-gray-300">NEXT</div>
+                <canvas id="nextCanvas" width="80" height="120"></canvas>
+            </div>
+            <div class="panel">
+                <div class="text-sm text-gray-300">SCORE</div>
+                <div id="scoreDisplay" class="value-text">0</div>
+            </div>
+            <div class="panel">
+                <div class="text-sm text-gray-300">MAX CHAIN</div>
+                <div id="chainDisplay" class="value-text">0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div class="mobile-controls">
+        <div class="btn btn-rot-l" ontouchstart="input.rotateLeft=true; event.preventDefault();" ontouchend="input.rotateLeft=false;">↺</div>
+        <div class="btn btn-rot-r" ontouchstart="input.rotateRight=true; event.preventDefault();" ontouchend="input.rotateRight=false;">↻</div>
+        <div class="btn btn-left" ontouchstart="input.left=true; event.preventDefault();" ontouchend="input.left=false;">←</div>
+        <div class="btn btn-down" ontouchstart="input.down=true; event.preventDefault();" ontouchend="input.down=false;">↓</div>
+        <div class="btn btn-right" ontouchstart="input.right=true; event.preventDefault();" ontouchend="input.right=false;">→</div>
+    </div>
+
+    <p class="mt-4 text-gray-400 text-sm hidden sm:block">Arrow keys to move, Z/X or Space to rotate</p>
+
+    <script>
+        // --- Constants & Config ---
+        const COLS = 6;
+        const ROWS = 12;
+        const CELL_SIZE = 40;
+        
+        // Colors: Empty(0), Red(1), Blue(2), Green(3), Yellow(4), Purple(5)
+        const COLORS = [
+            null,
+            { main: '#ff4d4d', dark: '#cc0000', light: '#ffb3b3' }, // 1: Red
+            { main: '#4d4dff', dark: '#0000cc', light: '#b3b3ff' }, // 2: Blue
+            { main: '#4dff4d', dark: '#00cc00', light: '#b3ffb3' }, // 3: Green
+            { main: '#ffff4d', dark: '#cccc00', light: '#ffffb3' }, // 4: Yellow
+            { main: '#b34dff', dark: '#8000cc', light: '#d9b3ff' }  // 5: Purple
+        ];
+        
+        const STATE = {
+            PLAYING: 0,
+            DROPPING: 1,
+            CHECKING: 2,
+            ERASING: 3,
+            GAMEOVER: 4
+        };
+
+        // --- Game State Variables ---
+        let board = [];
+        let state = STATE.PLAYING;
+        let score = 0;
+        let maxChain = 0;
+        let currentChain = 0;
+        
+        let activePair = null;
+        let nextPair = null;
+        
+        // Timers and Animation
+        let lastTime = 0;
+        let dropCounter = 0;
+        let dropInterval = 1000; // ms
+        let lockDelay = 0;
+        let animationTimer = 0;
+        
+        let particles = [];
+        let texts = []; // Floating text for chains
+        let erasingCells = []; // Cells currently being erased
+        let droppingCells = []; // Cells falling down after erase
+
+        // --- Input Handling ---
+        const input = { left: false, right: false, down: false, rotateLeft: false, rotateRight: false };
+        let prevInput = { left: false, right: false, down: false, rotateLeft: false, rotateRight: false };
+        let moveDelay = 0;
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') input.left = true;
+            if (e.key === 'ArrowRight') input.right = true;
+            if (e.key === 'ArrowDown') input.down = true;
+            if (e.key === 'z' || e.key === 'Z') input.rotateLeft = true;
+            if (e.key === 'x' || e.key === 'X' || e.key === ' ') input.rotateRight = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') input.left = false;
+            if (e.key === 'ArrowRight') input.right = false;
+            if (e.key === 'ArrowDown') input.down = false;
+            if (e.key === 'z' || e.key === 'Z') input.rotateLeft = false;
+            if (e.key === 'x' || e.key === 'X' || e.key === ' ') input.rotateRight = false;
+        });
+
+        // --- Initialization ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('nextCanvas');
+        const nextCtx = nextCanvas.getContext('2d');
+        const gameOverScreen = document.getElementById('game-over');
+        
+        function initBoard() {
+            board = [];
+            for (let r = 0; r < ROWS; r++) {
+                board[r] = new Array(COLS).fill(0);
+            }
+        }
+
+        function getRandomColor() {
+            return Math.floor(Math.random() * 5) + 1;
+        }
+
+        function generatePair() {
+            return {
+                c1: getRandomColor(),
+                c2: getRandomColor()
+            };
+        }
+
+        function spawnPair() {
+            if (!nextPair) nextPair = generatePair();
+            
+            // 軸ぷよ(p1)と子ぷよ(p2)
+            activePair = {
+                x: 2, y: 0,       // 軸の位置 (配列インデックスではない、浮動小数点許容)
+                p1: nextPair.c1,  // 軸の色
+                p2: nextPair.c2,  // 回転する方の色
+                rot: 0,           // 0:上, 1:右, 2:下, 3:左
+            };
+            
+            nextPair = generatePair();
+            
+            // ゲームオーバー判定: 出現位置にブロックがある
+            if (board[0][2] !== 0) {
+                state = STATE.GAMEOVER;
+                gameOverScreen.classList.add('show');
+            }
+        }
+
+        function resetGame() {
+            initBoard();
+            score = 0;
+            maxChain = 0;
+            currentChain = 0;
+            updateUI();
+            nextPair = null;
+            particles = [];
+            texts = [];
+            erasingCells = [];
+            droppingCells = [];
+            state = STATE.PLAYING;
+            gameOverScreen.classList.remove('show');
+            spawnPair();
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Logic Functions ---
+
+        // ペアのp2(子ぷよ)の相対位置を取得
+        function getP2Offset(rot) {
+            switch(rot) {
+                case 0: return {dx: 0, dy: -1}; // 上
+                case 1: return {dx: 1, dy: 0};  // 右
+                case 2: return {dx: 0, dy: 1};  // 下
+                case 3: return {dx: -1, dy: 0}; // 左
+            }
+        }
+
+        // 指定位置が壁または他のブロックに衝突しているか
+        function isCollision(x, y) {
+            // フィールド外
+            if (x < 0 || x >= COLS || y >= ROWS) return true;
+            // 天井より上は衝突とみなさない
+            if (y < 0) return false;
+            // ブロックがある
+            return board[Math.floor(y)][Math.floor(x)] !== 0;
+        }
+
+        // ペア全体の衝突判定
+        function isValidPosition(px, py, rot) {
+            if (isCollision(px, py)) return false; // 軸
+            const offset = getP2Offset(rot);
+            if (isCollision(px + offset.dx, py + offset.dy)) return false; // 子
+            return true;
+        }
+
+        function handleInput(deltaTime) {
+            if (state !== STATE.PLAYING || !activePair) return;
+
+            // Rotate
+            let newRot = activePair.rot;
+            let rotated = false;
+            
+            // Just pressed logic for rotation
+            if (input.rotateRight && !prevInput.rotateRight) {
+                newRot = (activePair.rot + 1) % 4;
+                rotated = true;
+            } else if (input.rotateLeft && !prevInput.rotateLeft) {
+                newRot = (activePair.rot + 3) % 4;
+                rotated = true;
+            }
+            
+            if (rotated) {
+                // Wall kick / Collision adjustment
+                if (isValidPosition(activePair.x, activePair.y, newRot)) {
+                    activePair.rot = newRot;
+                } else if (isValidPosition(activePair.x + 1, activePair.y, newRot)) {
+                    activePair.x += 1; activePair.rot = newRot;
+                } else if (isValidPosition(activePair.x - 1, activePair.y, newRot)) {
+                    activePair.x -= 1; activePair.rot = newRot;
+                } else if (isValidPosition(activePair.x, activePair.y - 1, newRot)) {
+                    activePair.y -= 1; activePair.rot = newRot; // 床蹴り
+                }
+            }
+
+            // Movement (with repeat delay)
+            moveDelay -= deltaTime;
+            if (moveDelay <= 0) {
+                let dx = 0;
+                if (input.left) dx = -1;
+                else if (input.right) dx = 1;
+
+                if (dx !== 0) {
+                    // 横移動は整数グリッドでのみ判定（滑らかな落下中でも）
+                    let ix = Math.floor(activePair.x);
+                    let iy = Math.ceil(activePair.y); // 下側のインデックスで判定
+                    
+                    if (isValidPosition(activePair.x + dx, activePair.y, activePair.rot)) {
+                        activePair.x += dx;
+                        moveDelay = 100; // DAS (Delayed Auto Shift)
+                    } else {
+                        moveDelay = 150; // Initial delay
+                    }
+                }
+            }
+            if (!input.left && !input.right) moveDelay = 0;
+
+            // Copy current input to prev for next frame
+            prevInput = { ...input };
+        }
+
+        function lockPair() {
+            // ペアをボードに固定
+            let ix = Math.floor(activePair.x);
+            let iy = Math.floor(activePair.y);
+            const offset = getP2Offset(activePair.rot);
+            let p2x = ix + offset.dx;
+            let p2y = iy + offset.dy;
+
+            if (iy >= 0 && iy < ROWS) board[iy][ix] = activePair.p1;
+            if (p2y >= 0 && p2y < ROWS) board[p2y][p2x] = activePair.p2;
+            
+            activePair = null;
+            currentChain = 0;
+            state = STATE.CHECKING;
+        }
+
+        function checkErasure() {
+            // 4つ以上つながっているブロックを探す
+            let visited = Array(ROWS).fill().map(() => Array(COLS).fill(false));
+            let toErase = [];
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] !== 0 && !visited[r][c]) {
+                        let color = board[r][c];
+                        let group = [];
+                        let stack = [{r, c}];
+                        
+                        while (stack.length > 0) {
+                            let curr = stack.pop();
+                            let cr = curr.r, cc = curr.c;
+                            
+                            if (cr < 0 || cr >= ROWS || cc < 0 || cc >= COLS) continue;
+                            if (visited[cr][cc]) continue;
+                            if (board[cr][cc] !== color) continue;
+                            
+                            visited[cr][cc] = true;
+                            group.push({r: cr, c: cc, color: color});
+                            
+                            stack.push({r: cr+1, c: cc});
+                            stack.push({r: cr-1, c: cc});
+                            stack.push({r: cr, c: cc+1});
+                            stack.push({r: cr, c: cc-1});
+                        }
+                        
+                        if (group.length >= 4) {
+                            toErase.push(...group);
+                        }
+                    }
+                }
+            }
+
+            if (toErase.length > 0) {
+                erasingCells = toErase;
+                animationTimer = 500; // 0.5s for erase animation
+                state = STATE.ERASING;
+                currentChain++;
+                
+                // Score calc
+                let baseScore = toErase.length * 10;
+                let chainBonus = currentChain > 1 ? Math.pow(2, currentChain - 1) : 1;
+                let earned = baseScore * chainBonus;
+                score += earned;
+                if (currentChain > maxChain) maxChain = currentChain;
+                
+                updateUI();
+                
+                // Add pop text
+                let cx = toErase[0].c * CELL_SIZE + CELL_SIZE/2;
+                let cy = toErase[0].r * CELL_SIZE;
+                texts.push({
+                    text: currentChain > 1 ? `${currentChain} CHAIN!` : "NICE!",
+                    x: cx, y: cy,
+                    life: 1000, maxLife: 1000,
+                    color: currentChain > 2 ? '#ff4757' : '#ffa502'
+                });
+                
+            } else {
+                // 何も消えなかったら次のペアへ
+                if (currentChain > 0) {
+                    // 連鎖終了
+                    currentChain = 0;
+                }
+                spawnPair();
+                state = STATE.PLAYING;
+            }
+        }
+
+        function calculateDrops() {
+            droppingCells = [];
+            // 各列について、浮いているブロックを落とす
+            for (let c = 0; c < COLS; c++) {
+                let emptyRow = ROWS - 1;
+                for (let r = ROWS - 1; r >= 0; r--) {
+                    if (board[r][c] !== 0) {
+                        if (r !== emptyRow) {
+                            // 動かす必要がある
+                            droppingCells.push({
+                                r: r, c: c, targetR: emptyRow, color: board[r][c], 
+                                currentY: r * CELL_SIZE, targetY: emptyRow * CELL_SIZE
+                            });
+                            // ボード上は一旦空にする(アニメーション完了後にセット)
+                            board[r][c] = 0;
+                        }
+                        emptyRow--;
+                    }
+                }
+            }
+            
+            if (droppingCells.length > 0) {
+                state = STATE.DROPPING;
+            } else {
+                // 落ちるものがなければ再度判定
+                state = STATE.CHECKING;
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('scoreDisplay').innerText = score;
+            document.getElementById('chainDisplay').innerText = maxChain;
+        }
+
+        // --- Update Loop ---
+        function update(deltaTime) {
+            
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.5; // gravity
+                p.life -= deltaTime;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            
+            // Update Texts
+            for (let i = texts.length - 1; i >= 0; i--) {
+                texts[i].life -= deltaTime;
+                texts[i].y -= 0.05 * deltaTime; // float up
+                if (texts[i].life <= 0) texts.splice(i, 1);
+            }
+
+            if (state === STATE.PLAYING) {
+                handleInput(deltaTime);
+                
+                // 自動落下
+                let currentInterval = input.down ? dropInterval / 15 : dropInterval; // 高速落下
+                dropCounter += deltaTime;
+                
+                if (dropCounter > currentInterval) {
+                    dropCounter = 0;
+                    if (isValidPosition(activePair.x, activePair.y + 1, activePair.rot)) {
+                        activePair.y += 1;
+                        lockDelay = 0;
+                    } else {
+                        // 下に壁/ブロックがある
+                        lockDelay += deltaTime + currentInterval;
+                        if (lockDelay > 500) { // 接地猶予時間 0.5s
+                            lockPair();
+                        }
+                    }
+                }
+            } 
+            else if (state === STATE.CHECKING) {
+                checkErasure();
+            }
+            else if (state === STATE.ERASING) {
+                animationTimer -= deltaTime;
+                if (animationTimer <= 0) {
+                    // アニメーション終了、ボードから削除してパーティクル発生
+                    erasingCells.forEach(cell => {
+                        let cx = cell.c * CELL_SIZE + CELL_SIZE/2;
+                        let cy = cell.r * CELL_SIZE + CELL_SIZE/2;
+                        let col = COLORS[cell.color].main;
+                        
+                        // Spawn particles
+                        for(let i=0; i<8; i++){
+                            particles.push({
+                                x: cx, y: cy,
+                                vx: (Math.random() - 0.5) * 10,
+                                vy: (Math.random() - 1) * 10,
+                                color: col,
+                                size: Math.random() * 8 + 4,
+                                life: Math.random() * 500 + 300
+                            });
+                        }
+                        board[cell.r][cell.c] = 0;
+                    });
+                    erasingCells = [];
+                    calculateDrops(); // 空いた空間を詰める
+                }
+            }
+            else if (state === STATE.DROPPING) {
+                let allLanded = true;
+                const dropSpeed = 0.02 * deltaTime; // pixels per ms
+                
+                droppingCells.forEach(cell => {
+                    if (cell.currentY < cell.targetY) {
+                        cell.currentY += dropSpeed * CELL_SIZE; // 落下速度
+                        allLanded = false;
+                        if (cell.currentY >= cell.targetY) {
+                            cell.currentY = cell.targetY;
+                        }
+                    }
+                });
+                
+                if (allLanded) {
+                    // ボード状態を確定
+                    droppingCells.forEach(cell => {
+                        board[cell.targetR][cell.c] = cell.color;
+                    });
+                    droppingCells = [];
+                    state = STATE.CHECKING; // 再度連結判定
+                }
+            }
+        }
+
+        // --- Rendering ---
+        function drawJelly(context, x, y, colorIdx, scale=1, alpha=1) {
+            if (colorIdx === 0) return;
+            const c = COLORS[colorIdx];
+            const radius = (CELL_SIZE / 2 - 2) * scale;
+            const cx = x + CELL_SIZE / 2;
+            const cy = y + CELL_SIZE / 2;
+
+            context.save();
+            context.globalAlpha = alpha;
+
+            // Shadow
+            context.beginPath();
+            context.arc(cx+2, cy+2, radius, 0, Math.PI * 2);
+            context.fillStyle = 'rgba(0,0,0,0.3)';
+            context.fill();
+
+            // Body Gradient
+            let grad = context.createRadialGradient(cx - radius/3, cy - radius/3, radius/10, cx, cy, radius);
+            grad.addColorStop(0, c.light);
+            grad.addColorStop(0.5, c.main);
+            grad.addColorStop(1, c.dark);
+            
+            context.beginPath();
+            // Jelly like shape (slightly squished if needed, but using circle for simplicity here)
+            context.arc(cx, cy, radius, 0, Math.PI * 2);
+            context.fillStyle = grad;
+            context.fill();
+            context.lineWidth = 1;
+            context.strokeStyle = 'rgba(255,255,255,0.2)';
+            context.stroke();
+
+            // Cute Eyes
+            context.fillStyle = 'white';
+            context.beginPath(); context.arc(cx - radius/3, cy - radius/5, radius/5, 0, Math.PI*2); context.fill();
+            context.beginPath(); context.arc(cx + radius/3, cy - radius/5, radius/5, 0, Math.PI*2); context.fill();
+            
+            context.fillStyle = 'black';
+            context.beginPath(); context.arc(cx - radius/3 + 1, cy - radius/5, radius/10, 0, Math.PI*2); context.fill();
+            context.beginPath(); context.arc(cx + radius/3 - 1, cy - radius/5, radius/10, 0, Math.PI*2); context.fill();
+
+            // Highlight
+            context.beginPath();
+            context.arc(cx - radius/2, cy - radius/2, radius/4, 0, Math.PI * 2);
+            context.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            context.fill();
+
+            context.restore();
+        }
+
+        function drawConnections(context) {
+            // つながっているブロック間の結合部を描画 (簡略化版)
+            context.lineWidth = 10;
+            context.lineCap = 'round';
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] !== 0) {
+                        let colIdx = board[r][c];
+                        context.strokeStyle = COLORS[colIdx].main;
+                        
+                        let cx = c * CELL_SIZE + CELL_SIZE/2;
+                        let cy = r * CELL_SIZE + CELL_SIZE/2;
+                        
+                        // 右と下だけチェックして線を描く
+                        if (c < COLS - 1 && board[r][c+1] === colIdx) {
+                            context.beginPath();
+                            context.moveTo(cx, cy);
+                            context.lineTo(cx + CELL_SIZE, cy);
+                            context.stroke();
+                        }
+                        if (r < ROWS - 1 && board[r+1][c] === colIdx) {
+                            context.beginPath();
+                            context.moveTo(cx, cy);
+                            context.lineTo(cx, cy + CELL_SIZE);
+                            context.stroke();
+                        }
+                    }
+                }
+            }
+        }
+
+        function render() {
+            // Clear Main Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Grid (subtle)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+            for(let i=1; i<COLS; i++) { ctx.beginPath(); ctx.moveTo(i*CELL_SIZE, 0); ctx.lineTo(i*CELL_SIZE, canvas.height); ctx.stroke(); }
+            for(let i=1; i<ROWS; i++) { ctx.beginPath(); ctx.moveTo(0, i*CELL_SIZE); ctx.lineTo(canvas.width, i*CELL_SIZE); ctx.stroke(); }
+
+            // Connections
+            drawConnections(ctx);
+
+            // Static Board
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] !== 0) {
+                        // If erasing, make it flash/shrink
+                        let isErasing = erasingCells.some(cell => cell.r === r && cell.c === c);
+                        if (isErasing) {
+                            let scale = (animationTimer / 500); // 1 -> 0
+                            let alpha = Math.abs(Math.sin(animationTimer / 50)); // Flash
+                            drawJelly(ctx, c * CELL_SIZE, r * CELL_SIZE, board[r][c], scale, alpha);
+                        } else {
+                            drawJelly(ctx, c * CELL_SIZE, r * CELL_SIZE, board[r][c]);
+                        }
+                    }
+                }
+            }
+
+            // Dropping Cells
+            if (state === STATE.DROPPING) {
+                droppingCells.forEach(cell => {
+                    drawJelly(ctx, cell.c * CELL_SIZE, cell.currentY, cell.color);
+                });
+            }
+
+            // Active Pair
+            if (state === STATE.PLAYING && activePair) {
+                // Ghost piece (landing prediction)
+                let ghostY = activePair.y;
+                while (isValidPosition(activePair.x, ghostY + 1, activePair.rot)) {
+                    ghostY += 1;
+                }
+                const offset = getP2Offset(activePair.rot);
+                drawJelly(ctx, activePair.x * CELL_SIZE, ghostY * CELL_SIZE, activePair.p1, 1, 0.3);
+                drawJelly(ctx, (activePair.x + offset.dx) * CELL_SIZE, (ghostY + offset.dy) * CELL_SIZE, activePair.p2, 1, 0.3);
+
+                // Actual piece (smooth y movement visually)
+                // y is integer logically, but we could interpolate for extreme smoothness. Here we use integer grid for logic, float for Y if we want.
+                // Since our y increments by 1 discretely, it might look snappy. 
+                // Let's just draw at current Y
+                drawJelly(ctx, activePair.x * CELL_SIZE, activePair.y * CELL_SIZE, activePair.p1);
+                drawJelly(ctx, (activePair.x + offset.dx) * CELL_SIZE, (activePair.y + offset.dy) * CELL_SIZE, activePair.p2);
+            }
+
+            // Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life / 800;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Texts
+            texts.forEach(t => {
+                ctx.fillStyle = t.color;
+                ctx.font = 'bold 24px "Fredoka One"';
+                ctx.textAlign = 'center';
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 4;
+                ctx.globalAlpha = t.life / t.maxLife;
+                ctx.strokeText(t.text, t.x, t.y);
+                ctx.fillText(t.text, t.x, t.y);
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Next Panel
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+            if (nextPair) {
+                drawJelly(nextCtx, 20, 20, nextPair.c2); // p2 is drawn above visually in next queue
+                drawJelly(nextCtx, 20, 60, nextPair.c1);
+            }
+        }
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            // Prevent huge jumps if tab was inactive
+            if (deltaTime < 100) { 
+                update(deltaTime);
+                render();
+            }
+
+            if (state !== STATE.GAMEOVER) {
+                requestAnimationFrame(gameLoop);
+            } else {
+                render(); // Draw game over state
+            }
+        }
+
+        // Boot
+        window.onload = () => {
+            initBoard();
+            resetGame();
+        };
+
+    </script>
+</body>
+</html>
